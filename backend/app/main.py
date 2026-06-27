@@ -46,7 +46,7 @@ Base.metadata.create_all(bind=engine)
 app = FastAPI(title="Employee Attendance System", lifespan=lifespan)
 
 default_origins = "http://localhost:5173,http://localhost:3000"
-allowed_origins = os.getenv("ALLOWED_ORIGINS", default_origins).split(",")
+allowed_origins = [o.strip().rstrip("/") for o in os.getenv("ALLOWED_ORIGINS", default_origins).split(",") if o.strip()]
 
 app.add_middleware(
     CORSMiddleware,
