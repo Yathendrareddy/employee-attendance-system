@@ -199,7 +199,8 @@ body {
   background: var(--warning-light); color: var(--warning);
   padding: 2px 7px; border-radius: 5px; margin-left: 5px;
 }
-.table-wrap { border: 1.5px solid var(--border); border-radius: 12px; overflow: hidden; }
+.table-wrap { border: 1.5px solid var(--border); border-radius: 12px; overflow-x: auto; }
+.data-table { min-width: 600px; }
 
 /* ── Manager ── */
 .mgr-screen { width: 860px; max-width: 98vw; padding: 2rem; }

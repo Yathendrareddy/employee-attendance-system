@@ -3,17 +3,17 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.background import BackgroundScheduler
 from contextlib import asynccontextmanager
-from datetime import datetime, date
 
 from app.database import Base, engine, SessionLocal
 from app.routers import users, attendance, manager
 from app import models
+from app.tz import store_now
 
 def auto_clockout_job():
     db = SessionLocal()
     try:
-        today = date.today()
-        now = datetime.now()
+        now = store_now()
+        today = now.date()
         weekday = today.weekday()  # 0=Mon ... 6=Sun
         closing = {0:22,1:22,2:22,3:22,4:23,5:23,6:21}
         closing_min = {0:0,1:0,2:0,3:0,4:0,5:0,6:30}

@@ -1,13 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import extract
-from datetime import date, datetime
+from datetime import datetime
 import csv, io
 from fastapi.responses import StreamingResponse
 
 from app.database import get_db
 from app.models import User, Attendance
 from app.schemas import EditAttendanceRequest
+from app.tz import store_today
 
 router = APIRouter()
 
@@ -16,7 +17,7 @@ def all_employees(db: Session = Depends(get_db)):
     users = db.query(User).filter(User.is_active == True).all()
     result = []
     for u in users:
-        today = date.today()
+        today = store_today()
         today_rec = next((a for a in u.attendance if a.date == today), None)
         status = "not_clocked_in"
         if today_rec:
@@ -135,7 +136,7 @@ def edit_attendance(record_id: int, data: EditAttendanceRequest, db: Session = D
 
 @router.get("/dashboard")
 def dashboard(db: Session = Depends(get_db)):
-    today = date.today()
+    today = store_today()
     users = db.query(User).filter(User.is_active == True).all()
     working_now = 0
     today_hours = 0.0

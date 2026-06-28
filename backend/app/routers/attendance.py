@@ -1,9 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from datetime import datetime, date
+from datetime import datetime
 from app.database import get_db
 from app.models import Attendance, User
 from app.schemas import ClockRequest
+from app.tz import store_now, store_today
 
 router = APIRouter()
 
@@ -13,7 +14,7 @@ def calc_hours(clock_in: datetime, clock_out: datetime) -> float:
 
 @router.post("/clock-in")
 def clock_in(data: ClockRequest, db: Session = Depends(get_db)):
-    today = date.today()
+    today = store_today()
     existing = db.query(Attendance).filter(
         Attendance.user_id == data.user_id,
         Attendance.date == today
@@ -25,7 +26,7 @@ def clock_in(data: ClockRequest, db: Session = Depends(get_db)):
     record = Attendance(
         user_id=data.user_id,
         date=today,
-        clock_in=datetime.now(),
+        clock_in=store_now(),
     )
     db.add(record)
     db.commit()
@@ -34,7 +35,7 @@ def clock_in(data: ClockRequest, db: Session = Depends(get_db)):
 
 @router.post("/clock-out")
 def clock_out(data: ClockRequest, db: Session = Depends(get_db)):
-    today = date.today()
+    today = store_today()
     record = db.query(Attendance).filter(
         Attendance.user_id == data.user_id,
         Attendance.date == today
@@ -43,7 +44,7 @@ def clock_out(data: ClockRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="You haven't clocked in today.")
     if record.clock_out:
         raise HTTPException(status_code=400, detail="Already clocked out.")
-    record.clock_out = datetime.now()
+    record.clock_out = store_now()
     record.hours_worked = calc_hours(record.clock_in, record.clock_out)
     db.commit()
     db.refresh(record)
@@ -51,7 +52,7 @@ def clock_out(data: ClockRequest, db: Session = Depends(get_db)):
 
 @router.get("/today/{user_id}")
 def today_status(user_id: int, db: Session = Depends(get_db)):
-    today = date.today()
+    today = store_today()
     record = db.query(Attendance).filter(
         Attendance.user_id == user_id,
         Attendance.date == today
