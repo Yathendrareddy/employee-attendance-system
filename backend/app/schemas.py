@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime, date
 
 class RegisterRequest(BaseModel):
@@ -20,6 +20,16 @@ class ClockRequest(BaseModel):
 class EditAttendanceRequest(BaseModel):
     clock_in: Optional[str] = None   # "HH:MM"
     clock_out: Optional[str] = None  # "HH:MM"
+
+class ManualAttendanceRequest(BaseModel):
+    employee_ids: List[int]
+    date: str                        # "YYYY-MM-DD"
+    clock_in: Optional[str] = None   # "HH:MM"
+    clock_out: Optional[str] = None  # "HH:MM"
+    manager_id: Optional[int] = None
+
+class ClockOutAllRequest(BaseModel):
+    manager_id: Optional[int] = None
 
 class AttendanceRecord(BaseModel):
     id: int
