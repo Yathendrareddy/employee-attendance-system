@@ -2,15 +2,46 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import extract
 from datetime import datetime
-import csv, io
+import csv, io, logging
 from fastapi.responses import StreamingResponse
 
 from app.database import get_db
 from app.models import User, Attendance
-from app.schemas import EditAttendanceRequest
-from app.tz import store_today
+from app.schemas import EditAttendanceRequest, ManualAttendanceRequest, ClockOutAllRequest
+from app.tz import store_now, store_today
 
 router = APIRouter()
+
+audit_logger = logging.getLogger("attendance_audit")
+audit_logger.setLevel(logging.INFO)
+if not audit_logger.handlers:
+    _audit_handler = logging.StreamHandler()
+    _audit_handler.setFormatter(logging.Formatter("%(asctime)s AUDIT %(message)s"))
+    audit_logger.addHandler(_audit_handler)
+    audit_logger.propagate = False
+
+
+def _parse_time_on_date(d, t: str) -> datetime:
+    try:
+        h, m = map(int, t.split(":"))
+        return datetime(d.year, d.month, d.day, h, m)
+    except (ValueError, AttributeError):
+        raise HTTPException(status_code=400, detail=f"Invalid time format: {t!r}. Expected HH:MM.")
+
+
+def _apply_times(record: Attendance, clock_in: str = None, clock_out: str = None):
+    """Set clock_in/out on a record from 'HH:MM' strings and recompute hours. Shared by
+    the single-record edit endpoint and the manager manual-entry/bulk endpoint."""
+    if clock_in is not None:
+        record.clock_in = _parse_time_on_date(record.date, clock_in)
+    if clock_out is not None:
+        record.clock_out = _parse_time_on_date(record.date, clock_out)
+
+    if record.clock_in and record.clock_out:
+        if record.clock_out <= record.clock_in:
+            raise HTTPException(status_code=400, detail="Clock out must be after clock in.")
+        record.hours_worked = round((record.clock_out - record.clock_in).total_seconds() / 3600, 2)
+        record.auto_clocked_out = False
 
 @router.get("/employees")
 def all_employees(db: Session = Depends(get_db)):
@@ -108,20 +139,7 @@ def edit_attendance(record_id: int, data: EditAttendanceRequest, db: Session = D
     if not record:
         raise HTTPException(status_code=404, detail="Attendance record not found.")
 
-    def parse_time(t: str) -> datetime:
-        h, m = map(int, t.split(":"))
-        return datetime(record.date.year, record.date.month, record.date.day, h, m)
-
-    if data.clock_in is not None:
-        record.clock_in = parse_time(data.clock_in)
-    if data.clock_out is not None:
-        record.clock_out = parse_time(data.clock_out)
-
-    if record.clock_in and record.clock_out:
-        if record.clock_out <= record.clock_in:
-            raise HTTPException(status_code=400, detail="Clock out must be after clock in.")
-        record.hours_worked = round((record.clock_out - record.clock_in).total_seconds() / 3600, 2)
-        record.auto_clocked_out = False
+    _apply_times(record, data.clock_in, data.clock_out)
 
     db.commit()
     db.refresh(record)
@@ -133,6 +151,107 @@ def edit_attendance(record_id: int, data: EditAttendanceRequest, db: Session = D
         "hours_worked": record.hours_worked,
         "auto_clocked_out": record.auto_clocked_out,
     }
+
+@router.post("/attendance/manual")
+def manual_attendance(data: ManualAttendanceRequest, db: Session = Depends(get_db)):
+    """Manager-only manual clock in/out entry and editing, for one or many employees at once.
+    Creates a record if none exists for that employee/date (manual entry), or updates it if one
+    does (edit) - the same code path covers both single and bulk operations."""
+    if not data.employee_ids:
+        raise HTTPException(status_code=400, detail="Select at least one employee.")
+    if data.clock_in is None and data.clock_out is None:
+        raise HTTPException(status_code=400, detail="Provide a clock in or clock out time.")
+
+    try:
+        rec_date = datetime.strptime(data.date, "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date. Expected YYYY-MM-DD.")
+
+    results = []
+    for emp_id in data.employee_ids:
+        user = db.query(User).filter(User.id == emp_id, User.is_active == True).first()
+        if not user:
+            continue
+
+        record = db.query(Attendance).filter(
+            Attendance.user_id == emp_id, Attendance.date == rec_date
+        ).first()
+        if record is None:
+            record = Attendance(user_id=emp_id, date=rec_date)
+            db.add(record)
+            old_in = old_out = None
+        else:
+            old_in, old_out = record.clock_in, record.clock_out
+
+        # A clock-in with no clock-out means the employee is starting a fresh shift now -
+        # clear any stale clock-out left over from a prior entry so status shows "working".
+        if data.clock_in is not None and data.clock_out is None and record.clock_out is not None:
+            record.clock_out = None
+            record.hours_worked = None
+            record.auto_clocked_out = False
+
+        _apply_times(record, data.clock_in, data.clock_out)
+        db.flush()
+
+        if data.clock_in is not None:
+            audit_logger.info(
+                "action=%s manager_id=%s employee_id=%s date=%s old=%s new=%s",
+                "edit_clock_in" if old_in is not None else "manual_clock_in",
+                data.manager_id, emp_id, rec_date, old_in, record.clock_in,
+            )
+        if data.clock_out is not None:
+            audit_logger.info(
+                "action=%s manager_id=%s employee_id=%s date=%s old=%s new=%s",
+                "edit_clock_out" if old_out is not None else "manual_clock_out",
+                data.manager_id, emp_id, rec_date, old_out, record.clock_out,
+            )
+
+        results.append({
+            "employee_id": emp_id,
+            "name": user.full_name,
+            "id": record.id,
+            "date": record.date,
+            "clock_in": record.clock_in,
+            "clock_out": record.clock_out,
+            "hours_worked": record.hours_worked,
+            "auto_clocked_out": record.auto_clocked_out,
+        })
+
+    db.commit()
+    return results
+
+@router.post("/attendance/clock-out-all")
+def clock_out_all(data: ClockOutAllRequest, db: Session = Depends(get_db)):
+    """Manager-only bulk action: clock out every employee actually clocked in right now
+    (today's open records with a clock-in already set, regardless of role)."""
+    now = store_now()
+    today = store_today()
+    open_records = db.query(Attendance).filter(
+        Attendance.date == today,
+        Attendance.clock_out == None,
+        Attendance.clock_in != None,
+    ).all()
+
+    results = []
+    for record in open_records:
+        record.clock_out = now
+        if record.clock_in < record.clock_out:
+            record.hours_worked = round((record.clock_out - record.clock_in).total_seconds() / 3600, 2)
+        record.auto_clocked_out = True
+
+        audit_logger.info(
+            "action=%s manager_id=%s employee_id=%s date=%s old=%s new=%s",
+            "bulk_clock_out", data.manager_id, record.user_id, today, None, record.clock_out,
+        )
+        results.append({
+            "employee_id": record.user_id,
+            "id": record.id,
+            "clock_out": record.clock_out,
+            "hours_worked": record.hours_worked,
+        })
+
+    db.commit()
+    return {"clocked_out": len(results), "records": results}
 
 @router.get("/dashboard")
 def dashboard(db: Session = Depends(get_db)):

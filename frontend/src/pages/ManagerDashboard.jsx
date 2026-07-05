@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { managerDashboard, allEmployees, managerReport, exportCSV, deleteEmployee, editAttendance } from '../services/api'
+import { managerDashboard, allEmployees, managerReport, exportCSV, deleteEmployee, editAttendance, clockOutAll } from '../services/api'
 import { toast } from '../components/Toast'
+import ManualEntryModal from '../components/ManualEntryModal'
 
 const AVATAR_COLORS = [
   { bg:'#DBEAFE', color:'#1E40AF' },
@@ -32,6 +33,7 @@ export default function ManagerDashboard() {
   const [editingId, setEditingId] = useState(null)
   const [editIn,  setEditIn]  = useState('')
   const [editOut, setEditOut] = useState('')
+  const [showManual, setShowManual] = useState(false)
 
   useEffect(() => {
     if (!user?.is_manager) { navigate('/'); return }
@@ -52,6 +54,19 @@ export default function ManagerDashboard() {
 
   const handleExport = () => { window.open(exportCSV(year, month), '_blank') }
   const handleLogout = () => { logout(); navigate('/') }
+
+  const handleClockOutAll = async () => {
+    if (!window.confirm('Clock out every employee currently clocked in? This cannot be undone.')) return
+    try {
+      const { data } = await clockOutAll(user?.id ?? null)
+      toast.success(data.clocked_out > 0 ? `Clocked out ${data.clocked_out} employee${data.clocked_out === 1 ? '' : 's'}.` : 'No one was clocked in.')
+      loadEmps()
+      loadDash()
+      if (tab === 'report') loadReport()
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Failed to clock out employees.')
+    }
+  }
 
   const handleDeleteEmployee = async (emp) => {
     if (!window.confirm(`Remove ${emp.name}? Their attendance history will be kept, but they won't be able to clock in anymore.`)) return
@@ -112,10 +127,26 @@ export default function ManagerDashboard() {
             </div>
             <div className="screen-sub">Welcome, Anil &nbsp;·&nbsp; {now.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'})}</div>
           </div>
-          <button className="btn btn-ghost btn-sm" onClick={handleLogout}>
-            <i className="ti ti-logout"/> Sign Out
-          </button>
+          <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
+            <button className="btn btn-primary btn-sm" onClick={()=>setShowManual(true)}>
+              <i className="ti ti-calendar-plus"/> Manual Time Entry
+            </button>
+            <button className="btn btn-danger btn-sm" onClick={handleClockOutAll}>
+              <i className="ti ti-logout-2"/> All Clock Out
+            </button>
+            <button className="btn btn-ghost btn-sm" onClick={handleLogout}>
+              <i className="ti ti-logout"/> Sign Out
+            </button>
+          </div>
         </div>
+
+        {showManual && (
+          <ManualEntryModal
+            employees={emps}
+            onClose={() => setShowManual(false)}
+            onSaved={() => { loadEmps(); loadDash(); if (tab === 'report') loadReport() }}
+          />
+        )}
 
         {/* Dash cards */}
         {dash && (
