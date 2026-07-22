@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { managerDashboard, allEmployees, managerReport, exportCSV, deleteEmployee, editAttendance, clockOutAll } from '../services/api'
+import { managerDashboard, allEmployees, managerReport, exportCSV, exportExcel, deleteEmployee, editAttendance, clockOutAll } from '../services/api'
 import { toast } from '../components/Toast'
 import ManualEntryModal from '../components/ManualEntryModal'
 
@@ -53,7 +53,14 @@ export default function ManagerDashboard() {
   }
 
   const handleExport = () => { window.open(exportCSV(year, month), '_blank') }
+  const handleExportExcel = () => { window.open(exportExcel(year, month), '_blank') }
   const handleLogout = () => { logout(); navigate('/') }
+
+  const handlePrint = () => {
+    if (loading) { toast.error('Report is still loading, please wait.'); return }
+    if (report.length === 0) { toast.error('No report data to print.'); return }
+    window.print()
+  }
 
   const handleClockOutAll = async () => {
     if (!window.confirm('Clock out every employee currently clocked in? This cannot be undone.')) return
@@ -108,6 +115,13 @@ export default function ManagerDashboard() {
   const monthOptions = Array.from({length:12},(_,i)=>({
     val:i+1, label:new Date(2000,i,1).toLocaleDateString('en-US',{month:'long'})
   }))
+  const monthLabel = monthOptions.find(m => m.val === month)?.label ?? ''
+
+  const recordStatus = (r) => {
+    if (!r.clock_in) return '—'
+    if (!r.clock_out) return 'In Progress'
+    return r.auto_clocked_out ? 'Auto Clock-Out' : 'Present'
+  }
 
   const StatusBadge = ({ s }) => {
     if (s === 'clocked_in')  return <span className="badge-clocked-in"><i className="ti ti-circle-filled" style={{fontSize:8}}/>Working</span>
@@ -116,7 +130,8 @@ export default function ManagerDashboard() {
   }
 
   return (
-    <div className="app-shell" style={{alignItems:'flex-start',paddingTop:'2rem'}}>
+    <>
+    <div className="app-shell no-print" style={{alignItems:'flex-start',paddingTop:'2rem'}}>
       <div className="card mgr-screen">
 
         {/* Header */}
@@ -236,7 +251,10 @@ export default function ManagerDashboard() {
               <button className="btn btn-ghost btn-sm" onClick={handleExport}>
                 <i className="ti ti-download"/> Export CSV
               </button>
-              <button className="btn btn-ghost btn-sm" onClick={()=>window.print()}>
+              <button className="btn btn-ghost btn-sm" onClick={handleExportExcel}>
+                <i className="ti ti-file-spreadsheet"/> Export Excel
+              </button>
+              <button className="btn btn-ghost btn-sm" onClick={handlePrint}>
                 <i className="ti ti-printer"/> Print
               </button>
             </div>
@@ -309,5 +327,56 @@ export default function ManagerDashboard() {
         )}
       </div>
     </div>
+
+    {/* Print-only timesheets: one printable page per employee. Rendered as a sibling
+        of the (display:none-in-print) dashboard so it isn't hidden along with it. */}
+    <div className="print-only">
+      {report.map((emp) => (
+        <section className="print-page" key={emp.id}>
+          <h1 className="print-title">Employee Timesheet</h1>
+          <table className="print-meta">
+            <tbody>
+              <tr><td>Employee Name</td><td>{emp.name}</td></tr>
+              <tr><td>Role</td><td>{emp.role}</td></tr>
+              <tr><td>Month / Year</td><td>{monthLabel} {year}</td></tr>
+              <tr><td>Working Days</td><td>{emp.days_worked}</td></tr>
+              <tr><td>Total Hours Worked</td><td>{emp.total_hours}</td></tr>
+            </tbody>
+          </table>
+
+          <table className="print-table">
+            <thead>
+              <tr><th>Date</th><th>Clock In</th><th>Clock Out</th><th>Hours</th><th>Status</th></tr>
+            </thead>
+            <tbody>
+              {emp.records.length === 0 && (
+                <tr><td colSpan={5}>No records this month</td></tr>
+              )}
+              {emp.records.map((r, ri) => (
+                <tr key={ri}>
+                  <td>{fmtDate(r.date)}</td>
+                  <td>{fmt(r.clock_in)}</td>
+                  <td>{fmt(r.clock_out)}</td>
+                  <td>{r.hours_worked ?? '—'}</td>
+                  <td>{recordStatus(r)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <div className="print-summary">
+            <span>Total Working Days: <strong>{emp.days_worked}</strong></span>
+            <span>Total Hours: <strong>{emp.total_hours}</strong></span>
+          </div>
+
+          <div className="print-signatures">
+            <div className="sig-block"><span className="sig-line"/>Employee Signature</div>
+            <div className="sig-block"><span className="sig-line"/>Manager Signature</div>
+            <div className="sig-block"><span className="sig-line"/>Date</div>
+          </div>
+        </section>
+      ))}
+    </div>
+    </>
   )
 }

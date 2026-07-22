@@ -2,8 +2,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import extract
 from datetime import datetime
-import csv, io, logging
+import csv, io, logging, re
 from fastapi.responses import StreamingResponse
+from openpyxl import Workbook
+from openpyxl.styles import Font
 
 from app.database import get_db
 from app.models import User, Attendance
@@ -121,6 +123,67 @@ def export_csv(year: int, month: int, db: Session = Depends(get_db)):
     return StreamingResponse(
         iter([output.getvalue()]),
         media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+def _unique_sheet_title(wb: Workbook, name: str) -> str:
+    """Excel sheet names must be <=31 chars, unique, and free of \\/*?:[]."""
+    base = re.sub(r"[\\/*?:\[\]]", " ", name).strip()[:31] or "Sheet"
+    title, n = base, 2
+    while title in wb.sheetnames:
+        suffix = f" ({n})"
+        title = base[: 31 - len(suffix)] + suffix
+        n += 1
+    return title
+
+
+@router.get("/export-excel")
+def export_excel(year: int, month: int, db: Session = Depends(get_db)):
+    users = db.query(User).filter(User.is_active == True).all()
+    wb = Workbook()
+    wb.remove(wb.active)
+
+    for u in users:
+        records = db.query(Attendance).filter(
+            Attendance.user_id == u.id,
+            extract("year",  Attendance.date) == year,
+            extract("month", Attendance.date) == month,
+        ).order_by(Attendance.date).all()
+
+        ws = wb.create_sheet(_unique_sheet_title(wb, u.full_name))
+        ws.append(["Date", "Clock In", "Clock Out", "Hours", "Auto"])
+        for cell in ws[1]:
+            cell.font = Font(bold=True)
+
+        total_hours = 0.0
+        for r in records:
+            ws.append([
+                r.date.isoformat(),
+                r.clock_in.strftime("%H:%M") if r.clock_in else "",
+                r.clock_out.strftime("%H:%M") if r.clock_out else "",
+                r.hours_worked or "",
+                "Yes" if r.auto_clocked_out else "No",
+            ])
+            total_hours += r.hours_worked or 0
+
+        ws.append([])
+        ws.append(["Total", "", "", round(total_hours, 2), ""])
+        for cell in ws[ws.max_row]:
+            cell.font = Font(bold=True)
+
+        for col, width in zip("ABCDE", (12, 10, 10, 8, 6)):
+            ws.column_dimensions[col].width = width
+
+    if not wb.sheetnames:
+        wb.create_sheet("No Employees")
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    filename = f"attendance_{year}_{month:02d}.xlsx"
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
 
