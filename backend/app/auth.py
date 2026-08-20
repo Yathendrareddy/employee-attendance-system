@@ -6,9 +6,9 @@ from app.models import User
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-# Manager credentials (in production, store in env vars)
-MANAGER_NAME     = "Anil"
-MANAGER_PASSWORD = "6472"
+# Manager credentials are read from the environment — never hardcode a PIN here.
+MANAGER_NAME = os.getenv("MANAGER_NAME", "Anil")
+MANAGER_PIN  = os.getenv("MANAGER_PIN")
 
 def hash_pin(pin: str) -> str:
     return pwd_context.hash(pin)
@@ -36,4 +36,6 @@ def create_user(db: Session, full_name: str, role: str, pin: str, phone: str = N
     return user
 
 def verify_manager(password: str) -> bool:
-    return password == MANAGER_PASSWORD
+    if not MANAGER_PIN:
+        return False
+    return password == MANAGER_PIN
