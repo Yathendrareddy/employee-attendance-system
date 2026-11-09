@@ -11,7 +11,9 @@ router = APIRouter()
 def register(data: RegisterRequest, db: Session = Depends(get_db)):
     if len(data.pin) != 4 or not data.pin.isdigit():
         raise HTTPException(status_code=400, detail="PIN must be exactly 4 digits.")
-    # Check PIN uniqueness
+    # Check PIN uniqueness (the manager PIN is reserved - login checks it first)
+    if verify_manager(data.pin):
+        raise HTTPException(status_code=400, detail="PIN already in use. Choose another.")
     existing = get_user_by_pin(db, data.pin)
     if existing:
         raise HTTPException(status_code=400, detail="PIN already in use. Choose another.")

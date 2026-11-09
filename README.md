@@ -112,7 +112,7 @@ Frontend runs at: **http://localhost:5173**
 | Ravi Kumar   | 2222 | Chef       |
 | Nadia Hassan | 3333 | Cashier    |
 | Tom Clarke   | 4444 | Supervisor |
-| **Anil (Manager)** | **6472** | Manager |
+| **Anil (Manager)** | set via `MANAGER_PIN` env var | Manager |
 
 ---
 

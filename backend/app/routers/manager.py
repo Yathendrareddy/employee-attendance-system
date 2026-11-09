@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import extract
-from datetime import datetime
+from datetime import datetime, date
 import csv, io, logging, re
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
@@ -11,6 +11,7 @@ from app.database import get_db
 from app.models import User, Attendance
 from app.schemas import EditAttendanceRequest, ManualAttendanceRequest, ClockOutAllRequest
 from app.tz import store_now, store_today
+from app.hours import ShiftRecord, aggregate_month
 
 router = APIRouter()
 
@@ -94,6 +95,28 @@ def manager_report(year: int, month: int, db: Session = Depends(get_db)):
                 "auto_clocked_out": r.auto_clocked_out,
             } for r in records],
         })
+    return result
+
+@router.get("/calendar")
+def hours_calendar(year: int, month: int, db: Session = Depends(get_db)):
+    """Per-day employee hours for the manager calendar. Includes removed employees'
+    historical records, since those hours were genuinely worked."""
+    if not 1 <= month <= 12:
+        raise HTTPException(status_code=400, detail="Month must be between 1 and 12.")
+    start = date(year, month, 1)
+    end = date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)
+    rows = (
+        db.query(Attendance, User.full_name)
+        .join(User, User.id == Attendance.user_id)
+        .filter(Attendance.date >= start, Attendance.date < end)
+        .all()
+    )
+    records = [
+        ShiftRecord(a.user_id, name, a.date, a.clock_in, a.clock_out, a.hours_worked)
+        for a, name in rows
+    ]
+    result = aggregate_month(records, year, month)
+    result["today"] = store_today().isoformat()
     return result
 
 @router.get("/export-csv")

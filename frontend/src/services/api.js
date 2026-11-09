@@ -20,6 +20,7 @@ export const monthlyReport = (user_id, year, month) =>
 export const managerDashboard  = ()            => api.get('/manager/dashboard')
 export const allEmployees      = ()            => api.get('/manager/employees')
 export const managerReport     = (year, month) => api.get('/manager/report',  { params: { year, month } })
+export const hoursCalendar     = (year, month) => api.get('/manager/calendar', { params: { year, month } })
 export const exportCSV         = (year, month) =>
   `${API_ROOT}/api/manager/export-csv?year=${year}&month=${month}`
 export const exportExcel       = (year, month) =>

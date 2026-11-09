@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import { managerDashboard, allEmployees, managerReport, exportCSV, exportExcel, deleteEmployee, editAttendance, clockOutAll } from '../services/api'
 import { toast } from '../components/Toast'
 import ManualEntryModal from '../components/ManualEntryModal'
+import HoursCalendar from '../components/HoursCalendar'
 
 const AVATAR_COLORS = [
   { bg:'#DBEAFE', color:'#1E40AF' },
@@ -34,6 +35,8 @@ export default function ManagerDashboard() {
   const [editIn,  setEditIn]  = useState('')
   const [editOut, setEditOut] = useState('')
   const [showManual, setShowManual] = useState(false)
+  const [calRefresh, setCalRefresh] = useState(0)   // bump to make the calendar re-fetch
+  const refreshCalendar = () => setCalRefresh(n => n + 1)
 
   useEffect(() => {
     if (!user?.is_manager) { navigate('/'); return }
@@ -69,6 +72,7 @@ export default function ManagerDashboard() {
       toast.success(data.clocked_out > 0 ? `Clocked out ${data.clocked_out} employee${data.clocked_out === 1 ? '' : 's'}.` : 'No one was clocked in.')
       loadEmps()
       loadDash()
+      refreshCalendar()
       if (tab === 'report') loadReport()
     } catch (e) {
       toast.error(e.response?.data?.detail || 'Failed to clock out employees.')
@@ -107,6 +111,7 @@ export default function ManagerDashboard() {
       toast.success('Hours updated.')
       cancelEdit()
       loadReport()
+      refreshCalendar()
     } catch (e) {
       toast.error(e.response?.data?.detail || 'Failed to update hours.')
     }
@@ -159,7 +164,7 @@ export default function ManagerDashboard() {
           <ManualEntryModal
             employees={emps}
             onClose={() => setShowManual(false)}
-            onSaved={() => { loadEmps(); loadDash(); if (tab === 'report') loadReport() }}
+            onSaved={() => { loadEmps(); loadDash(); refreshCalendar(); if (tab === 'report') loadReport() }}
           />
         )}
 
@@ -191,6 +196,9 @@ export default function ManagerDashboard() {
           </button>
           <button className={`tab-btn ${tab==='report'?'active':''}`}  onClick={()=>setTab('report')}>
             <i className="ti ti-calendar-stats"/> Monthly Report
+          </button>
+          <button className={`tab-btn ${tab==='calendar'?'active':''}`} onClick={()=>setTab('calendar')}>
+            <i className="ti ti-calendar-month"/> Hours Calendar
           </button>
         </div>
 
@@ -236,6 +244,9 @@ export default function ManagerDashboard() {
             </div>
           </div>
         )}
+
+        {/* ── Hours Calendar Tab ── */}
+        {tab === 'calendar' && <HoursCalendar refreshToken={calRefresh} />}
 
         {/* ── Report Tab ── */}
         {tab === 'report' && (
