@@ -28,7 +28,7 @@ SHIFTS = [
 ]
 
 CLOSING = {0:22, 1:22, 2:22, 3:22, 4:23, 5:23, 6:21}
-CLOSING_MIN = {0:0, 1:0, 2:0, 3:0, 4:0, 5:0, 6:30}
+CLOSING_MIN = {0:0, 1:0, 2:0, 3:0, 4:0, 5:0, 6:10}
 
 def calc_hours(ci, co):
     delta = co - ci

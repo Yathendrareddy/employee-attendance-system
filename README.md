@@ -122,9 +122,9 @@ Frontend runs at: **http://localhost:5173**
 |----------------|-------------|
 | Mon – Thu      | 10:00 PM    |
 | Fri – Sat      | 11:00 PM    |
-| Sunday         | 9:30 PM     |
+| Sunday         | 9:10 PM     |
 
-The scheduler checks every minute. If an employee forgets to clock out, the system automatically closes their shift at store closing time.
+The scheduler checks every minute. If an employee forgets to clock out, the system automatically closes their shift at store closing time and calculates the hours. Shifts missed while the server was down are caught up on startup.
 
 ---
 

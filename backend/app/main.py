@@ -1,3 +1,4 @@
+import logging
 import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,34 +9,22 @@ from app.database import Base, engine, SessionLocal
 from app.routers import users, attendance, manager
 from app import models
 from app.tz import store_now
+from app.closing import auto_close_open_shifts
 
 def auto_clockout_job():
     db = SessionLocal()
     try:
-        now = store_now()
-        today = now.date()
-        weekday = today.weekday()  # 0=Mon ... 6=Sun
-        closing = {0:22,1:22,2:22,3:22,4:23,5:23,6:21}
-        closing_min = {0:0,1:0,2:0,3:0,4:0,5:0,6:30}
-        close_hour = closing[weekday]
-        close_min  = closing_min[weekday]
-
-        if now.hour == close_hour and now.minute == close_min:
-            open_records = (
-                db.query(models.Attendance)
-                .filter(models.Attendance.date == today, models.Attendance.clock_out == None)
-                .all()
-            )
-            for rec in open_records:
-                rec.clock_out = now.replace(second=0, microsecond=0)
-                rec.auto_clocked_out = True
-            db.commit()
+        auto_close_open_shifts(db, store_now())
     finally:
         db.close()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     scheduler = BackgroundScheduler()
+    try:
+        auto_clockout_job()   # catch up on shifts left open while the server was down
+    except Exception:
+        logging.exception("Startup auto clock-out sweep failed; the scheduler will retry")
     scheduler.add_job(auto_clockout_job, "interval", minutes=1)
     scheduler.start()
     yield
