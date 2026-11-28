@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { managerDashboard, allEmployees, managerReport, exportCSV, exportExcel, deleteEmployee, editAttendance, clockOutAll } from '../services/api'
+import { managerDashboard, allEmployees, managerReport, exportCSV, exportExcel, deleteEmployee, editAttendance, deleteAttendance, clockOutAll } from '../services/api'
 import { toast } from '../components/Toast'
 import ManualEntryModal from '../components/ManualEntryModal'
 import HoursCalendar from '../components/HoursCalendar'
@@ -104,6 +104,22 @@ export default function ManagerDashboard() {
   }
 
   const cancelEdit = () => { setEditingId(null); setEditIn(''); setEditOut('') }
+
+  const handleDeleteRecord = async (emp, r) => {
+    const times = r.clock_in ? ` (${fmt(r.clock_in)} – ${fmt(r.clock_out)})` : ''
+    if (!window.confirm(`Delete ${emp.name}'s record for ${fmtDate(r.date)}${times}? This cannot be undone.`)) return
+    try {
+      await deleteAttendance(r.id, user?.id ?? null)
+      toast.success('Record deleted.')
+      if (editingId === r.id) cancelEdit()
+      loadReport()
+      loadDash()
+      loadEmps()
+      refreshCalendar()
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Failed to delete record.')
+    }
+  }
 
   const saveEdit = async () => {
     try {
@@ -314,7 +330,10 @@ export default function ManagerDashboard() {
                                 <td>{fmt(r.clock_out)}{r.auto_clocked_out && <span className="auto-badge">auto</span>}</td>
                                 <td style={{fontWeight:600,color:r.hours_worked?'#1A56DB':undefined}}>{r.hours_worked ?? '—'}</td>
                                 <td>
-                                  <button className="btn btn-ghost btn-sm" onClick={()=>startEdit(r)}><i className="ti ti-pencil"/> Edit</button>
+                                  <div style={{display:'flex',gap:6}}>
+                                    <button className="btn btn-ghost btn-sm" onClick={()=>startEdit(r)}><i className="ti ti-pencil"/> Edit</button>
+                                    <button className="btn btn-ghost btn-sm" style={{marginTop:0,color:'#E02424'}} onClick={()=>handleDeleteRecord(emp, r)}><i className="ti ti-trash"/> Delete</button>
+                                  </div>
                                 </td>
                               </>
                             )}

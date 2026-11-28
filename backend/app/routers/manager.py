@@ -238,6 +238,21 @@ def edit_attendance(record_id: int, data: EditAttendanceRequest, db: Session = D
         "auto_clocked_out": record.auto_clocked_out,
     }
 
+@router.delete("/attendance/{record_id}")
+def delete_attendance(record_id: int, manager_id: int = None, db: Session = Depends(get_db)):
+    """Manager-only: permanently remove one attendance row (e.g. a mistaken entry)."""
+    record = db.query(Attendance).filter(Attendance.id == record_id).first()
+    if not record:
+        raise HTTPException(status_code=404, detail="Attendance record not found.")
+    audit_logger.info(
+        "action=%s manager_id=%s employee_id=%s date=%s old=%s new=%s",
+        "delete_record", manager_id, record.user_id, record.date,
+        f"{record.clock_in}..{record.clock_out} ({record.hours_worked}h)", None,
+    )
+    db.delete(record)
+    db.commit()
+    return {"message": "Attendance record deleted.", "id": record_id}
+
 @router.post("/attendance/manual")
 def manual_attendance(data: ManualAttendanceRequest, db: Session = Depends(get_db)):
     """Manager-only manual clock in/out entry and editing, for one or many employees at once.

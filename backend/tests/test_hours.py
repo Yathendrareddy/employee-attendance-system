@@ -200,5 +200,16 @@ class CalendarEndpointTests(unittest.TestCase):
             hours_calendar(2026, 13, self.db)
 
 
+    def test_delete_record_removes_it_from_calendar(self):
+        from fastapi import HTTPException
+        from app.routers.manager import delete_attendance, hours_calendar
+        rec = self.db.query(Attendance).filter(Attendance.date == NOV9).first()
+        delete_attendance(rec.id, None, self.db)
+        out = hours_calendar(2026, 11, self.db)
+        self.assertEqual(out["days"][0]["employee_count"], 1)
+        with self.assertRaises(HTTPException):
+            delete_attendance(rec.id, None, self.db)
+
+
 if __name__ == "__main__":
     unittest.main()

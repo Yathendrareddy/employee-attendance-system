@@ -27,5 +27,7 @@ export const exportExcel       = (year, month) =>
   `${API_ROOT}/api/manager/export-excel?year=${year}&month=${month}`
 export const deleteEmployee    = (user_id)     => api.delete(`/manager/employees/${user_id}`)
 export const editAttendance    = (record_id, data) => api.patch(`/manager/attendance/${record_id}`, data)
+export const deleteAttendance  = (record_id, manager_id) =>
+  api.delete(`/manager/attendance/${record_id}`, { params: { manager_id } })
 export const manualAttendance  = (data)        => api.post('/manager/attendance/manual', data)
 export const clockOutAll       = (manager_id)  => api.post('/manager/attendance/clock-out-all', { manager_id })
