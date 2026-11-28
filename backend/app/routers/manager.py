@@ -112,7 +112,8 @@ def hours_calendar(year: int, month: int, db: Session = Depends(get_db)):
         .all()
     )
     records = [
-        ShiftRecord(a.user_id, name, a.date, a.clock_in, a.clock_out, a.hours_worked)
+        ShiftRecord(a.user_id, name, a.date, a.clock_in, a.clock_out, a.hours_worked,
+                    a.id, bool(a.auto_clocked_out))
         for a, name in rows
     ]
     result = aggregate_month(records, year, month)

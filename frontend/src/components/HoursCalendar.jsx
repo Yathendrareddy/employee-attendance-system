@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { hoursCalendar } from '../services/api'
+import { hoursCalendar, editAttendance, deleteAttendance } from '../services/api'
+import { useAuth } from '../context/AuthContext'
+import { toast } from './Toast'
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const POLL_MS = 60_000
@@ -8,12 +10,18 @@ const pad = (n) => String(n).padStart(2, '0')
 const isoDate = (y, m, d) => `${y}-${pad(m)}-${pad(d)}`
 // Up to two decimals, no trailing zeros: 15 -> "15", 7.5 -> "7.5", 7.33 -> "7.33"
 const fmtHrs = (h) => `${Number((h ?? 0).toFixed(2))} hrs`
+const fmtTime = (dt) => dt ? new Date(dt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : '—'
+const toTimeInput = (dt) => {
+  if (!dt) return ''
+  const d = new Date(dt)
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
 const longDate = (iso) => {
   const [y, m, d] = iso.split('-').map(Number)
   return new Date(y, m - 1, d).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
 }
 
-export default function HoursCalendar({ refreshToken }) {
+export default function HoursCalendar({ refreshToken, onDataChanged }) {
   const [view, setView] = useState(() => {
     const n = new Date()
     return { year: n.getFullYear(), month: n.getMonth() + 1 }
@@ -173,17 +181,58 @@ export default function HoursCalendar({ refreshToken }) {
       )}
 
       {modalOpen && selected && (
-        <DayHoursModal iso={selected} day={selectedDay} onClose={() => setModalOpen(false)} />
+        <DayHoursModal iso={selected} day={selectedDay} onClose={() => setModalOpen(false)}
+                       onChanged={async () => { await load(true); onDataChanged?.() }} />
       )}
     </div>
   )
 }
 
-function DayHoursModal({ iso, day, onClose }) {
+function DayHoursModal({ iso, day, onClose, onChanged }) {
+  const { user } = useAuth()
+  const [editing, setEditing] = useState(null)   // record id being edited
+  const [editIn,  setEditIn]  = useState('')
+  const [editOut, setEditOut] = useState('')
+  const [busy,    setBusy]    = useState(false)
   const employees = day?.employees ?? []
+
+  const startEdit = (r) => { setEditing(r.id); setEditIn(toTimeInput(r.clock_in)); setEditOut(toTimeInput(r.clock_out)) }
+  const cancelEdit = () => { setEditing(null); setEditIn(''); setEditOut('') }
+
+  const saveEdit = async () => {
+    if (!editIn) { toast.error('Clock in time is required.'); return }
+    setBusy(true)
+    try {
+      await editAttendance(editing, { clock_in: editIn, clock_out: editOut || null })
+      toast.success('Hours updated.')
+      cancelEdit()
+      await onChanged()
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Failed to update hours.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const remove = async (emp, r) => {
+    const times = r.clock_in ? ` (${fmtTime(r.clock_in)} – ${fmtTime(r.clock_out)})` : ''
+    if (!window.confirm(`Delete ${emp.name}'s shift${times}? This cannot be undone.`)) return
+    setBusy(true)
+    try {
+      await deleteAttendance(r.id, user?.id ?? null)
+      toast.success('Shift deleted.')
+      if (editing === r.id) cancelEdit()
+      await onChanged()
+    } catch (e) {
+      toast.error(e.response?.data?.detail || 'Failed to delete shift.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="card modal-box" role="dialog" aria-modal="true" aria-labelledby="day-hours-title"
+      <div className="card modal-box day-modal" role="dialog" aria-modal="true" aria-labelledby="day-hours-title"
            onClick={e => e.stopPropagation()}>
         <div className="mgr-header" style={{ marginBottom: '1rem' }}>
           <div>
@@ -193,7 +242,7 @@ function DayHoursModal({ iso, day, onClose }) {
             </div>
             <div className="screen-sub">{longDate(iso)}</div>
           </div>
-          <button className="btn btn-ghost btn-sm" onClick={onClose} aria-label="Close"><i className="ti ti-x" /></button>
+          <button className="icon-btn" onClick={onClose} aria-label="Close"><i className="ti ti-x" /></button>
         </div>
 
         {employees.length === 0 ? (
@@ -201,29 +250,45 @@ function DayHoursModal({ iso, day, onClose }) {
             <i className="ti ti-clock-off" />No hours recorded for this date.
           </div>
         ) : (
-          <table className="cal-table">
-            <thead>
-              <tr><th>Employee</th><th>Working Hours</th></tr>
-            </thead>
-            <tbody>
-              {employees.map(e => (
-                <tr key={e.id}>
-                  <td>
-                    {e.name}
-                    {e.shifts > 1 && <span className="text-muted"> · {e.shifts} shifts</span>}
-                  </td>
-                  <td>
-                    {fmtHrs(e.hours)}
-                    {e.in_progress && <span className="badge-clocked-in" style={{ marginLeft: 8 }}>In progress</span>}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr className="tfoot-row"><td>Total Employees</td><td>{day.employee_count}</td></tr>
-              <tr className="tfoot-row"><td>Total Hrs</td><td>{fmtHrs(day.total_hours)}</td></tr>
-            </tfoot>
-          </table>
+          <div className="day-list">
+            {employees.map(emp => (
+              <div className="day-emp" key={emp.id}>
+                <div className="day-emp-head">
+                  <span className="day-emp-name">{emp.name}</span>
+                  <span className="day-emp-hrs">{fmtHrs(emp.hours)}</span>
+                </div>
+                {emp.records.map(r => editing === r.id ? (
+                  <div className="shift-row shift-editing" key={r.id}>
+                    <label>In <input type="time" className="select-ctrl" value={editIn} onChange={e => setEditIn(e.target.value)} autoFocus /></label>
+                    <label>Out <input type="time" className="select-ctrl" value={editOut} onChange={e => setEditOut(e.target.value)} /></label>
+                    <div className="shift-actions">
+                      <button className="icon-btn primary" onClick={saveEdit} disabled={busy}><i className="ti ti-check" /> Save</button>
+                      <button className="icon-btn" onClick={cancelEdit} disabled={busy} aria-label="Cancel edit"><i className="ti ti-x" /></button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="shift-row" key={r.id}>
+                    <span className="shift-times">
+                      {fmtTime(r.clock_in)} – {r.clock_out ? fmtTime(r.clock_out) : <em>still working</em>}
+                      {r.auto_clocked_out && <span className="auto-badge">auto</span>}
+                    </span>
+                    <div className="shift-actions">
+                      <button className="icon-btn" onClick={() => startEdit(r)} disabled={busy} title="Edit shift" aria-label={`Edit ${emp.name}'s shift`}>
+                        <i className="ti ti-pencil" /><span className="icon-btn-text"> Edit</span>
+                      </button>
+                      <button className="icon-btn danger" onClick={() => remove(emp, r)} disabled={busy} title="Delete shift" aria-label={`Delete ${emp.name}'s shift`}>
+                        <i className="ti ti-trash" /><span className="icon-btn-text"> Delete</span>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ))}
+            <div className="day-totals">
+              <div><span>Total Employees</span><strong>{day.employee_count}</strong></div>
+              <div><span>Total Hrs</span><strong>{fmtHrs(day.total_hours)}</strong></div>
+            </div>
+          </div>
         )}
 
         <button className="btn btn-primary mt-2" style={{ width: '100%' }} onClick={onClose}>Close</button>

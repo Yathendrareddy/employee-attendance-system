@@ -12,7 +12,8 @@ Policies (kept in one place so the calendar, its popup and the monthly summary a
 * Overlaps / duplicates: an employee's shifts on the same date are merged as time
   intervals before summing, so duplicate or overlapping records count once.
 * Missing data: open shifts (clocked in, not yet out) count 0 minutes and are flagged
-  as in progress. Records with clock_out <= clock_in are ignored. Nothing is invented.
+  as in progress. Records with clock_out <= clock_in count 0 minutes. Nothing is invented.
+  Every raw record is still listed per employee so the manager can edit or delete it.
 * Unpaid breaks: the schema does not record breaks, so no deduction is applied.
 """
 from collections import defaultdict
@@ -29,6 +30,8 @@ class ShiftRecord:
     clock_in: Optional[datetime]
     clock_out: Optional[datetime]
     hours_worked: Optional[float] = None
+    id: Optional[int] = None
+    auto_clocked_out: bool = False
 
 
 def _to_minute(dt: datetime) -> datetime:
@@ -58,7 +61,7 @@ def _merged_minutes(intervals):
 def aggregate_month(records: Iterable[ShiftRecord], year: int, month: int) -> dict:
     """Group attendance records by date and employee and compute minute-precise totals."""
     # (date, user_id) -> working state
-    buckets = defaultdict(lambda: {"intervals": [], "extra_minutes": 0, "shifts": 0, "in_progress": False})
+    buckets = defaultdict(lambda: {"intervals": [], "extra_minutes": 0, "shifts": 0, "in_progress": False, "records": []})
     names = {}
 
     for r in records:
@@ -66,6 +69,7 @@ def aggregate_month(records: Iterable[ShiftRecord], year: int, month: int) -> di
             continue
         names[r.user_id] = r.name
         b = buckets[(r.date, r.user_id)]
+        b["records"].append(r)
 
         if r.clock_in and r.clock_out:
             start, end = _to_minute(r.clock_in), _to_minute(r.clock_out)
@@ -82,8 +86,6 @@ def aggregate_month(records: Iterable[ShiftRecord], year: int, month: int) -> di
     days = defaultdict(list)
     for (d, uid), b in buckets.items():
         minutes = _merged_minutes(b["intervals"]) + b["extra_minutes"]
-        if minutes == 0 and not b["in_progress"]:
-            continue
         days[d].append({
             "id": uid,
             "name": names[uid],
@@ -91,6 +93,13 @@ def aggregate_month(records: Iterable[ShiftRecord], year: int, month: int) -> di
             "hours": minutes_to_hours(minutes),
             "shifts": b["shifts"],
             "in_progress": b["in_progress"],
+            "records": [{
+                "id": r.id,
+                "clock_in": r.clock_in.isoformat() if r.clock_in else None,
+                "clock_out": r.clock_out.isoformat() if r.clock_out else None,
+                "hours_worked": r.hours_worked,
+                "auto_clocked_out": r.auto_clocked_out,
+            } for r in sorted(b["records"], key=lambda r: r.clock_in or datetime.min)],
         })
 
     day_list = []

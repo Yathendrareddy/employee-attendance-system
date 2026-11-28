@@ -75,9 +75,21 @@ class DailyAggregationTests(unittest.TestCase):
         self.assertTrue(day["employees"][0]["in_progress"])
         self.assertEqual(out["summary"]["working_days"], 0)
 
-    def test_invalid_record_is_ignored(self):
+    def test_invalid_record_counts_zero_but_is_listed(self):
         out = aggregate_month([rec(1, "A", NOV9, "17:00", "09:00")], 2026, 11)
-        self.assertEqual(out["days"], [])
+        day = out["days"][0]
+        self.assertEqual(day["total_minutes"], 0)
+        self.assertEqual(day["employee_count"], 0)
+        self.assertEqual(len(day["employees"][0]["records"]), 1)   # still editable/deletable
+        self.assertEqual(out["summary"]["working_days"], 0)
+
+    def test_each_shift_record_is_listed_with_times(self):
+        out = aggregate_month([
+            rec(1, "A", NOV9, "13:00", "17:00"),
+            rec(1, "A", NOV9, "08:00", "12:00"),
+        ], 2026, 11)
+        recs = out["days"][0]["employees"][0]["records"]
+        self.assertEqual([r["clock_in"] for r in recs], ["2026-11-09T08:00:00", "2026-11-09T13:00:00"])
 
     def test_records_outside_month_are_ignored(self):
         out = aggregate_month([rec(1, "A", date(2026, 10, 31), "09:00", "17:00")], 2026, 11)

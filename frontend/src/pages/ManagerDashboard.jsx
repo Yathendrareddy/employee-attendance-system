@@ -262,7 +262,7 @@ export default function ManagerDashboard() {
         )}
 
         {/* ── Hours Calendar Tab ── */}
-        {tab === 'calendar' && <HoursCalendar refreshToken={calRefresh} />}
+        {tab === 'calendar' && <HoursCalendar refreshToken={calRefresh} onDataChanged={() => { loadDash(); loadEmps() }} />}
 
         {/* ── Report Tab ── */}
         {tab === 'report' && (
